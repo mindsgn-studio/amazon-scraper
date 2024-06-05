@@ -11,7 +11,7 @@ import (
 
 	"github.com/gocolly/colly"
 	"github.com/joho/godotenv"
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/mindsgn-studio/amazon-scraper/category"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -20,6 +20,7 @@ import (
 var mongoClient *mongo.Client
 var ctx context.Context
 var totalPages int = 1
+var total uint64 = 0
 
 type Price struct {
 	ItemID   string    `bson:"ItemID"`
@@ -104,14 +105,15 @@ func extractPrice(text string) (float64, error) {
 	re := regexp.MustCompile(`\d+\.\d+`)
 	match := re.FindString(text)
 	price, err := strconv.ParseFloat(match, 64)
+
 	if err != nil {
 		return 0, fmt.Errorf("Error parsing price")
 	}
+
 	return price, nil
 }
 
 func saveItemData(title string, images []string, link string, id string) {
-
 	db := mongoClient.Database("snapprice")
 	collection := db.Collection("items")
 
@@ -196,7 +198,9 @@ func getPage(brand string, page int) {
 	collyClient.Wait()
 
 	if page >= totalPages {
+		fmt.Println(time.Now(), "Total Items:", total)
 		totalPages = 1
+		total = 0
 		getBrand()
 	} else {
 		page++
@@ -204,47 +208,10 @@ func getPage(brand string, page int) {
 	}
 }
 
-func getBrand() error {
-	db := mongoClient.Database("snapprice")
-	collection := db.Collection("items")
-
-	pipeline := mongo.Pipeline{
-		{{"$group", bson.D{
-			{"_id", "$brand"},
-			{"count", bson.D{{"$sum", 1}}},
-		}}},
-		{{"$project", bson.D{
-			{"_id", 0},
-			{"brand", "$_id"},
-			{"count", 1},
-		}}},
-		{{"$sample", bson.D{{"size", 1}}}},
-	}
-
-	cursor, err := collection.Aggregate(ctx, pipeline)
-	if err != nil {
-		return fmt.Errorf("error creating aggregation cursor: %w", err)
-	}
-	defer func() {
-		if err := cursor.Close(ctx); err != nil {
-			fmt.Printf("error closing cursor: %v\n", err)
-		}
-	}()
-
-	for cursor.Next(ctx) {
-		var result bson.M
-		if err := cursor.Decode(&result); err != nil {
-			return fmt.Errorf("error decoding document: %w", err)
-		}
-		brand := result["brand"].(string)
-		getPage(brand, 1)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return fmt.Errorf("cursor error: %w", err)
-	}
-
-	return nil
+func getBrand() {
+	brand := category.GetRandomCategory()
+	fmt.Println(time.Now(), brand)
+	getPage(brand, 1)
 }
 
 func main() {
