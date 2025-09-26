@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocolly/colly"
 	"github.com/joho/godotenv"
-	"github.com/mindsgn-studio/amazon-scraper/category"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -23,7 +25,7 @@ var totalPages int = 1
 var total uint64 = 0
 
 type Price struct {
-	ItemID   string    `bson:"ItemID"`
+	ItemID   string    `bson:"itemID"`
 	Date     time.Time `bson:"date"`
 	Currency string    `bson:"currency"`
 	Price    float64   `bson:"price"`
@@ -54,12 +56,17 @@ func connectDatabase() error {
 	return nil
 }
 
+func randomSleep() {
+	seconds := rand.Intn(10) + 1
+	time.Sleep(time.Duration(seconds) * time.Second)
+}
+
 func saveItemPrice(price float64, title string, link string) {
 	db := mongoClient.Database("snapprice")
 	itemCollection := db.Collection("items")
 	pricesCollection := db.Collection("prices")
 
-	twelveHoursAgo := time.Now().Add(-12 * time.Hour)
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
 
 	filter := map[string]interface{}{
 		"title": title,
@@ -77,7 +84,7 @@ func saveItemPrice(price float64, title string, link string) {
 		itemID := id.Hex()
 		filter := map[string]interface{}{
 			"itemID": itemID,
-			"date":   map[string]interface{}{"$gt": twelveHoursAgo},
+			"date":   map[string]interface{}{"$gt": twoHoursAgo},
 		}
 
 		var result map[string]interface{}
@@ -102,14 +109,20 @@ func saveItemPrice(price float64, title string, link string) {
 }
 
 func extractPrice(text string) (float64, error) {
-	re := regexp.MustCompile(`\d+\.\d+`)
-	match := re.FindString(text)
-	price, err := strconv.ParseFloat(match, 64)
-
+	re := regexp.MustCompile(`R[ \xA0]?([\d \xA0]+,\d{2})`)
+	match := re.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return 0, fmt.Errorf("No price found")
+	}
+	// Remove spaces/non-breaking spaces
+	clean := strings.ReplaceAll(match[1], " ", "")
+	clean = strings.ReplaceAll(clean, "\u00A0", "")
+	// Replace comma with dot
+	clean = strings.Replace(clean, ",", ".", 1)
+	price, err := strconv.ParseFloat(clean, 64)
 	if err != nil {
 		return 0, fmt.Errorf("Error parsing price")
 	}
-
 	return price, nil
 }
 
@@ -159,10 +172,10 @@ func getPage(brand string, page int) {
 				itemID = cardParent.Attr("data-asin")
 			})
 
-			name = cardElement.ChildText("span.a-size-base-plus.a-color-base.a-text-normal")
-
+			name = cardElement.ChildText("h2.a-size-base-plus.a-color-base.a-text-normal")
 			text := cardElement.ChildText("span.a-offscreen")
 			price, err := extractPrice(text)
+
 			if err != nil {
 				return
 			}
@@ -189,7 +202,6 @@ func getPage(brand string, page int) {
 				if page == 1 {
 					totalPages = number
 				}
-
 			}
 		})
 	})
@@ -197,8 +209,9 @@ func getPage(brand string, page int) {
 	collyClient.Visit(link)
 	collyClient.Wait()
 
+	randomSleep()
+
 	if page >= totalPages {
-		fmt.Println(time.Now(), "Total Items:", total)
 		totalPages = 1
 		total = 0
 		getBrand()
@@ -209,8 +222,27 @@ func getPage(brand string, page int) {
 }
 
 func getBrand() {
-	brand := category.GetRandomCategory()
-	fmt.Println(time.Now(), brand)
+	data, err := ioutil.ReadFile("brand.txt")
+	if err != nil {
+		fmt.Println("Error reading brand.txt:", err)
+		return
+	}
+	// Split by comma and trim spaces
+	rawBrands := strings.Split(string(data), ",")
+	var brands []string
+	for _, b := range rawBrands {
+		trimmed := strings.TrimSpace(b)
+		if trimmed != "" {
+			brands = append(brands, trimmed)
+		}
+	}
+	if len(brands) == 0 {
+		fmt.Println("No brands found in brand.txt")
+		return
+	}
+	rand.Seed(time.Now().UnixNano())
+	brand := brands[rand.Intn(len(brands))]
+	fmt.Println(brand)
 	getPage(brand, 1)
 }
 
