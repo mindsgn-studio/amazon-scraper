@@ -181,7 +181,7 @@ func getPage(brand string, page int) {
 			}
 
 			cardElement.ForEach("a.a-link-normal.s-no-outline", func(_ int, h *colly.HTMLElement) {
-				itemLink = "https://www.amazon.co.za/" + h.Attr("href")
+				itemLink = "https://www.amazon.co.za" + h.Attr("href")
 			})
 
 			cardElement.ForEach("img.s-image", func(_ int, h *colly.HTMLElement) {
