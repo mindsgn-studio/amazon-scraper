@@ -23,6 +23,7 @@ var mongoClient *mongo.Client
 var ctx context.Context
 var totalPages int = 1
 var total uint64 = 0
+var item uint64 = 0
 
 type Price struct {
 	ItemID   string    `bson:"itemID"`
@@ -44,7 +45,7 @@ func connectDatabase() error {
 		return fmt.Errorf("error connecting to MongoDB: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	err = mongoClient.Ping(ctx, nil)
@@ -158,7 +159,18 @@ func saveItemData(title string, images []string, link string, id string) {
 
 func getPage(brand string, page int) {
 	collyClient := colly.NewCollector()
+	collyClient.UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	var link = fmt.Sprintf("https://www.amazon.co.za/s?k=%s&page=%d", url.QueryEscape(brand), page)
+
+	/*
+		collyClient.OnRequest(func(r *colly.Request) {
+			fmt.Println("Visiting", r.URL.String())
+		})
+
+		collyClient.OnError(func(r *colly.Response, err error) {
+			fmt.Printf("Request to %s failed: %v\n", r.Request.URL, err)
+		})
+	*/
 
 	collyClient.OnHTML("div.s-result-list.s-search-results.sg-row", func(h *colly.HTMLElement) {
 		h.ForEach("div.a-section.a-spacing-base", func(_ int, cardElement *colly.HTMLElement) {
@@ -188,6 +200,8 @@ func getPage(brand string, page int) {
 				images = append(images, h.Attr("src"))
 			})
 
+			item++
+
 			saveItemData(name, images, itemLink, itemID)
 			saveItemPrice(price, name, itemLink)
 		})
@@ -211,12 +225,19 @@ func getPage(brand string, page int) {
 
 	randomSleep()
 
+	fmt.Print("items: ", item, "\tpage: ", page, "/", totalPages)
+	fmt.Print("\n")
+
 	if page >= totalPages {
 		totalPages = 1
 		total = 0
+		item = 0
+		fmt.Print("\n")
+		fmt.Print("\n")
 		getBrand()
 	} else {
 		page++
+		item = 0
 		getPage(brand, page)
 	}
 }
@@ -242,7 +263,9 @@ func getBrand() {
 	}
 	rand.Seed(time.Now().UnixNano())
 	brand := brands[rand.Intn(len(brands))]
+	fmt.Println("================================")
 	fmt.Println(brand)
+	fmt.Println("================================")
 	getPage(brand, 1)
 }
 
